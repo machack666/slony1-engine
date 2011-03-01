@@ -5257,6 +5257,10 @@ create table @NAMESPACE@.sl_components (
 ';
   	   execute v_query;
 	end if;
+	if not exists (select 1 from information_schema.tables t where table_schema = '_@CLUSTERNAME@' and table_name = 'sl_event_lock') then
+	   v_query := 'create table @NAMESPACE@.sl_event_lock (dummy integer);';
+	   execute v_query;
+        end if;
 	return p_old;
 end;
 $$ language plpgsql
@@ -5774,3 +5778,12 @@ language plpgsql;
 
 comment on function @NAMESPACE@.component_state (i_actor text, i_pid integer, i_node integer, i_conn_pid integer, i_activity text, i_starttime timestamptz, i_event bigint, i_eventtype text) is
 'Store state of a Slony component.  Useful for monitoring';
+create or replace function @NAMESPACE@.pre_event_create () returns integer as $$
+begin
+	lock table @NAMESPACE@.sl_event_lock;
+	return 1;
+end
+$$ language plpgsql;
+
+comment on function @NAMESPACE@.pre_event_create () is 
+'Establish lock on sl_event_lock to ensure events are created in order';
