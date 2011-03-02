@@ -5787,3 +5787,5 @@ $$ language plpgsql;
 
 comment on function @NAMESPACE@.pre_event_create () is 
 'Establish lock on sl_event_lock to ensure events are created in order';
+=======
+>>>>>>> No value in having pre_event_create() function...  That leaves the race condition in place.
