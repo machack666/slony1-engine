@@ -1203,6 +1203,7 @@ remoteWorkerThread_main(void *cdata)
 								 "lock table %s.sl_event_lock;"
 								 "select %s.failoverSet_int(%d, %d, %d, %s); ",
 								 rtcfg_namespace,
+								 rtcfg_namespace,
 								 failed_node, backup_node, set_id, seqbuf);
 
 				need_reloadListen = true;
