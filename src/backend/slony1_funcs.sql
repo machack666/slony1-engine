@@ -3695,6 +3695,7 @@ declare
 	v_row				record;
 begin
 	if p_only_on_node = -1 then
+	        perform @NAMESPACE@.ddlScript_complete_int(p_set_id,p_only_on_node);
 		return  @NAMESPACE@.createEvent('_@CLUSTERNAME@', 'DDL_SCRIPT', 
 			p_set_id::text, p_script::text, p_only_on_node::text);
 	end if;
@@ -3705,6 +3706,7 @@ begin
 		end loop;
 		execute v_query;
 		execute 'drop table _slony1_saved_session_replication_role';
+		perform @NAMESPACE@.ddlScript_complete_int(p_set_id,p_only_on_node);
 	end if;
 	return NULL;
 end;
@@ -3790,6 +3792,7 @@ declare
 	v_row				record;
 begin
 	perform @NAMESPACE@.updateRelname(p_set_id, p_only_on_node);
+	perform @NAMESPACE@.repair_log_triggers(true);
 	return p_set_id;
 end;
 $$ language plpgsql;
@@ -5805,24 +5808,76 @@ before the SUBSCRIBE_SET event propogates to the receiver
 so listen paths can be updated.';
 
 create or replace function @NAMESPACE@.recreate_log_trigger(p_fq_table_name text,
-        p_tab_id oid, p_tab_attkind text) returns integer as $$
- begin
-   execute 'drop trigger "_@CLUSTERNAME@_logtrigger" on ' ||
-       p_fq_table_name ;
-       -- ----
-   execute 'create trigger "_@CLUSTERNAME@_logtrigger"' || 
-           ' after insert or update or delete on ' ||
-           p_fq_table_name 
-           || ' for each row execute procedure @NAMESPACE@.logTrigger (' ||
-                                pg_catalog.quote_literal('_@CLUSTERNAME@') || ',' || 
-               pg_catalog.quote_literal(p_tab_id::text) || ',' || 
-               pg_catalog.quote_literal(p_tab_attkind) || ');';
- 
-   return 0;
- end
- $$ language plpgsql;
- 
- comment on function  @NAMESPACE@.recreate_log_trigger(p_fq_table_name text,
-        p_tab_id oid, p_tab_attkind text) is
- 'A function that drops and recreates the log trigger on the specified table.
- It is intended to be used after the primary_key/unique index has changed.';
+       p_tab_id oid, p_tab_attkind text) returns integer as $$
+begin
+	execute 'drop trigger "_@CLUSTERNAME@_logtrigger" on ' ||
+		p_fq_table_name	;
+		-- ----
+	execute 'create trigger "_@CLUSTERNAME@_logtrigger"' || 
+			' after insert or update or delete on ' ||
+			p_fq_table_name 
+			|| ' for each row execute procedure @NAMESPACE@.logTrigger (' ||
+                               pg_catalog.quote_literal('_@CLUSTERNAME@') || ',' || 
+				pg_catalog.quote_literal(p_tab_id::text) || ',' || 
+				pg_catalog.quote_literal(p_tab_attkind) || ');';
+	raise notice 'inside of recreate log trigger';
+	return 0;
+end
+$$ language plpgsql;
+
+comment on function  @NAMESPACE@.recreate_log_trigger(p_fq_table_name text,
+       p_tab_id oid, p_tab_attkind text) is
+'A function that drops and recreates the log trigger on the specified table.
+It is intended to be used after the primary_key/unique index has changed.';
+
+create or replace function @NAMESPACE@.repair_log_triggers(only_locked boolean)
+returns integer as $$
+declare
+	retval integer;
+begin
+	raise notice 'inside of repair triggers';
+	if only_locked then
+	
+		select @NAMESPACE@.recreate_log_trigger(tab_nspname||'.'||tab_relname 
+	       	,tab_id,@NAMESPACE@.determineAttKindUnique(tab_nspname||
+					'.'||tab_relname,tab_idxname)) 
+		into retval from @NAMESPACE@.sl_table, 
+		     		pg_trigger,
+				pg_locks				
+		where tab_reloid=tgrelid and 
+		@NAMESPACE@.determineAttKindUnique(tab_nspname||'.'
+						||tab_relname,tab_idxname)
+			!=(string_to_array(tgargs::text,E'\\000'::text))[3]
+			and relation=tab_reloid 
+			and pid=pg_backend_pid()
+			and mode='AccessExclusiveLock' 
+			and tgname =  '_@CLUSTERNAME@'
+			|| '_logtrigger';
+	else
+		select @NAMESPACE@.recreate_log_trigger(tab_nspname||'.'||tab_relname 
+	       	,tab_id,@NAMESPACE@.determineAttKindUnique(tab_nspname||
+					'.'||tab_relname,tab_idxname)) 
+		into retval
+		from @NAMESPACE@.sl_table, 
+		     		pg_trigger				
+		where tab_reloid=tgrelid and 
+		@NAMESPACE@.determineAttKindUnique(tab_nspname||'.'
+						||tab_relname,tab_idxname)
+			!=(string_to_array(tgargs::text,E'\\000'::text))[3]
+			and tgname = '_@CLUSTERNAME@'
+			|| '_logtrigger';
+
+	end if;
+	return retval;
+
+end
+$$
+language plpgsql;
+comment on function @NAMESPACE@.repair_log_triggers(only_locked boolean)
+is '
+repair the log triggers as required.  If only_locked is true then only 
+tables that are already exclusivly locked by the current transaction are 
+repaired. Otherwise all replicated tables with outdated trigger arguments
+are recreated.';
+
+
