@@ -5803,3 +5803,26 @@ comment on function @NAMESPACE@.reshapeSubscription(int4,int4,int4) is
 subscription is being changed.  Slonik will invoke this method
 before the SUBSCRIBE_SET event propogates to the receiver
 so listen paths can be updated.';
+
+create or replace function @NAMESPACE@.recreate_log_trigger(p_fq_table_name text,
+        p_tab_id oid, p_tab_attkind text) returns integer as $$
+ begin
+   execute 'drop trigger "_@CLUSTERNAME@_logtrigger" on ' ||
+       p_fq_table_name ;
+       -- ----
+   execute 'create trigger "_@CLUSTERNAME@_logtrigger"' || 
+           ' after insert or update or delete on ' ||
+           p_fq_table_name 
+           || ' for each row execute procedure @NAMESPACE@.logTrigger (' ||
+                                pg_catalog.quote_literal('_@CLUSTERNAME@') || ',' || 
+               pg_catalog.quote_literal(p_tab_id::text) || ',' || 
+               pg_catalog.quote_literal(p_tab_attkind) || ');';
+ 
+   return 0;
+ end
+ $$ language plpgsql;
+ 
+ comment on function  @NAMESPACE@.recreate_log_trigger(p_fq_table_name text,
+        p_tab_id oid, p_tab_attkind text) is
+ 'A function that drops and recreates the log trigger on the specified table.
+ It is intended to be used after the primary_key/unique index has changed.';
