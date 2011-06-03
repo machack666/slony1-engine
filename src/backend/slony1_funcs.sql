@@ -198,6 +198,14 @@ schema/functions.';
 
 select @NAMESPACE@.checkmoduleversion();
 
+create or replace function @NAMESPACE@.decode_tgargs(bytea) returns text[] as 
+'$libdir/slony1_funcs','_slon_decode_tgargs' language C security definer;
+
+comment on function @NAMESPACE@.decode_tgargs(bytea) is 
+'Translates the contents of pg_trigger.tgargs to an array of text arguments';
+
+grant execute on function @NAMESPACE@.decode_tgargs(bytea) to public;
+
 -----------------------------------------------------------------------
 -- This function checks to see if the namespace name is valid.  
 --
@@ -5820,7 +5828,6 @@ begin
                                pg_catalog.quote_literal('_@CLUSTERNAME@') || ',' || 
 				pg_catalog.quote_literal(p_tab_id::text) || ',' || 
 				pg_catalog.quote_literal(p_tab_attkind) || ');';
-	raise notice 'inside of recreate log trigger';
 	return 0;
 end
 $$ language plpgsql;
@@ -5834,42 +5841,38 @@ create or replace function @NAMESPACE@.repair_log_triggers(only_locked boolean)
 returns integer as $$
 declare
 	retval integer;
+	table_row record;
 begin
-	raise notice 'inside of repair triggers';
-	if only_locked then
-	
-		select @NAMESPACE@.recreate_log_trigger(tab_nspname||'.'||tab_relname 
-	       	,tab_id,@NAMESPACE@.determineAttKindUnique(tab_nspname||
-					'.'||tab_relname,tab_idxname)) 
-		into retval from @NAMESPACE@.sl_table, 
-		     		pg_trigger,
-				pg_locks				
+	retval=0;
+	for table_row in	
+		select  tab_nspname,tab_relname,
+				tab_idxname, tab_id, mode,
+				@NAMESPACE@.determineAttKindUnique(tab_nspname||
+					'.'||tab_relname,tab_idxname) as attkind
+		from
+				@NAMESPACE@.sl_table
+				left join 
+				pg_locks on (relation=tab_reloid and pid=pg_backend_pid())				
+				,pg_trigger
 		where tab_reloid=tgrelid and 
 		@NAMESPACE@.determineAttKindUnique(tab_nspname||'.'
 						||tab_relname,tab_idxname)
-			!=(string_to_array(tgargs::text,E'\\000'::text))[3]
-			and relation=tab_reloid 
-			and pid=pg_backend_pid()
-			and mode='AccessExclusiveLock' 
+			!=(@NAMESPACE@.decode_tgargs(tgargs))[2]
 			and tgname =  '_@CLUSTERNAME@'
-			|| '_logtrigger';
-	else
-		select @NAMESPACE@.recreate_log_trigger(tab_nspname||'.'||tab_relname 
-	       	,tab_id,@NAMESPACE@.determineAttKindUnique(tab_nspname||
-					'.'||tab_relname,tab_idxname)) 
-		into retval
-		from @NAMESPACE@.sl_table, 
-		     		pg_trigger				
-		where tab_reloid=tgrelid and 
-		@NAMESPACE@.determineAttKindUnique(tab_nspname||'.'
-						||tab_relname,tab_idxname)
-			!=(string_to_array(tgargs::text,E'\\000'::text))[3]
-			and tgname = '_@CLUSTERNAME@'
-			|| '_logtrigger';
-
-	end if;
+			|| '_logtrigger'
+		LOOP
+				if (only_locked=false) or table_row.mode='AccessExclusiveLock' then
+					 perform @NAMESPACE@.recreate_log_trigger
+					 		 (table_row.tab_nspname||'.'||table_row.tab_relname,
+							 table_row.tab_id,table_row.attkind);
+					retval=retval+1;
+				else 
+					 raise notice '%.% has an invalid configuration on the log trigger. This was not corrected because only_lock is true and the table is not locked.',
+					 table_row.tab_nspname,table_row.tab_relname;
+			
+				end if;
+		end loop;
 	return retval;
-
 end
 $$
 language plpgsql;
