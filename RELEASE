@@ -5,6 +5,9 @@
 - Fixed slonik memory corruption when it tries to get the last known
   event_id from a node that doesn't yet have slony installed.
 
+- Bug 219 Default to PostgreSQL 8.4 support if the version of PG is newer than
+          what slony recognizes.
+
 * 2.1.0 (beta 2)
 - Bug #204 -  Upgrade from 2.0.x fails under PostgreSQL 8.3
 
