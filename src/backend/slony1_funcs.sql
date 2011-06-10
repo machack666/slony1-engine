@@ -5885,10 +5885,10 @@ begin
 		from
 				@NAMESPACE@.sl_table
 				left join 
-				pg_locks on (relation=tab_reloid and pid=pg_backend_pid())				
+				pg_locks on (relation=tab_reloid and pid=pg_backend_pid() and mode='AccessExclusiveLock')				
 				,information_schema.triggers, pg_class, pg_namespace
 		where 
-		'EXECUTE PROCEDURE _@CLUSTERNAME@.logtrigger(''_@CLUSTERNAME@'', '''||tab_id||''', ''' || @NAMESPACE@.determineAttKindUnique(tab_nspname||'.'
+		'EXECUTE PROCEDURE @NAMESPACE@.logtrigger(''_@CLUSTERNAME@'', '''||tab_id||''', ''' || @NAMESPACE@.determineAttKindUnique(tab_nspname||'.'
 						||tab_relname,tab_idxname) ||''')'
 			!= action_statement
 			and pg_class.oid=sl_table.tab_reloid
