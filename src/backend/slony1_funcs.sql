@@ -198,13 +198,6 @@ schema/functions.';
 
 select @NAMESPACE@.checkmoduleversion();
 
-create or replace function @NAMESPACE@.decode_tgargs(bytea) returns text[] as 
-'$libdir/slony1_funcs','_slon_decode_tgargs' language C security definer;
-
-comment on function @NAMESPACE@.decode_tgargs(bytea) is 
-'Translates the contents of pg_trigger.tgargs to an array of text arguments';
-
-grant execute on function @NAMESPACE@.decode_tgargs(bytea) to public;
 
 -----------------------------------------------------------------------
 -- This function checks to see if the namespace name is valid.  
@@ -5853,13 +5846,17 @@ begin
 				@NAMESPACE@.sl_table
 				left join 
 				pg_locks on (relation=tab_reloid and pid=pg_backend_pid())				
-				,pg_trigger
-		where tab_reloid=tgrelid and 
-		@NAMESPACE@.determineAttKindUnique(tab_nspname||'.'
-						||tab_relname,tab_idxname)
-			!=(@NAMESPACE@.decode_tgargs(tgargs))[2]
-			and tgname =  '_@CLUSTERNAME@'
-			|| '_logtrigger'
+				,information_schema.triggers, pg_class, pg_namespace
+		where 
+		'EXECUTE PROCEDURE _@CLUSTERNAME@.logtrigger(''_@CLUSTERNAME@'', '''||tab_id||''', ''' || @NAMESPACE@.determineAttKindUnique(tab_nspname||'.'
+						||tab_relname,tab_idxname) ||''')'
+			!= action_statement
+			and pg_class.oid=sl_table.tab_reloid
+			and pg_namespace.oid=pg_class.relnamespace
+			and triggers.event_object_schema=pg_namespace.nspname
+			and triggers.event_object_table=pg_class.relname
+			and triggers.event_manipulation='INSERT'
+			and triggers.trigger_name='_@CLUSTERNAME@_logtrigger'
 		LOOP
 				if (only_locked=false) or table_row.mode='AccessExclusiveLock' then
 					 perform @NAMESPACE@.recreate_log_trigger
